@@ -1,0 +1,158 @@
+RESTAURANT MANAGEMENT DATABASE SYSTEM (RMDS)
+
+Course Project: Database Systems II Prepared By: MUTAZ , 31086/2025
+
+Database Platform: Oracle Database 21c Express Edition Date: July 14, 2026
+
+1. Executive Summary & Introduction
+
+The Restaurant Management Database System (RMDS) is an advanced relational database solution built using Oracle SQL and PL/SQL. Modern restaurants face severe data challenges in maintaining dynamic menus, processing orders rapidly, avoiding conflicts during high-volume periods, and securing operations.
+
+This comprehensive system is designed to provide complete control over menu items, ensure system-wide database integrity, and construct an automated audit trail. By centralizing operations under modular PL/SQL structures and defensive triggers, the system significantly reduces manual overhead, blocks unauthorized alterations outside business hours, and maintains complete historical transparency.
+
+2. Problem Statement
+
+Traditional restaurant databases often experience structural and logistical challenges due to loose validation mechanisms. The specific problem components resolved by this system include:
+
+o Dynamic Menu Operations: Adding, updating, and viewing menu items requires unified packaging rather than isolated scripts.
+Integrity Enforcement: Validating transactions like calculating subtotals requires highly efficient, server-side processing to ensure that formulas (such as Subtotal = Price × Quantity) remain uniform and free of client-side rounding errors.                                                                                                                                                           Security and Business Rules Constraints: Critical structures (like the main active menu) must be protected from accidental or malicious modification during specific periods, such as regular business hours (Monday to Friday) or specified public holidays.
+
+Accountability and Traceability: Any alterations to key system tables must be permanently logged for subsequent security audits without reducing the application's response time.
+
+3. Database Schema & Architecture
+
+To fulfill these requirements, the database is normalized and structured around three primary relational tables designed to support transactional and audit capabilities.
+
+Table Structures
+
+A. Core Menu Items (Menu_Items)
+
+Stores the active items in the restaurant's system. Uses system-generated identity keys for primary keys and enforces positive prices.
+item_id (NUMBER): GENERATED ALWAYS AS IDENTITY, PRIMARY KEY. Unique, auto-incremented identifier.
+
+i tem_name (VARCHAR2(100)): NOT NULL. Name of the meal or drink item.
+
+category (VARCHAR2(50)): NOT NULL. Categorization (e.g., Main Course, Dessert, Beverage).
+
+price (NUMBER(6,2)): NOT NULL, CHECK (price > 0). Item cost. Must be strictly positive.
+B. Public Holidays (Public_Holidays)
+
+Serves as a dynamic reference table storing restricted holiday dates to validate business transaction limitations.
+holiday_date (DATE): PRIMARY KEY. The specific calendar date of the holiday.
+
+holiday_name (VARCHAR2(100)): NOT NULL. The official name of the designated holiday.
+
+C. Audit Trail Log (Audit_Log)
+
+A high-performance append-only log table configured to trace user activity details dynamically triggered by any structural modifications.
+Log_id (NUMBER): GENERATED ALWAYS AS IDENTITY, PRIMARY KEY. Chronological sequence auto-key.
+
+username (VARCHAR2(30)): Oracle Database User who executed the change.
+
+action_type (VARCHAR2(20)): Type of DML execution (INSERT, UPDATE, or DELETE).
+
+table_name (VARCHAR2(30)): Name of the target modified table (e.g., MENU_ITEMS).
+
+action_date (TIMESTAMP): The absolute timestamp down to fractional seconds.
+
+4. PL/SQL Implementation: Packages & Cursors
+
+All dynamic operational logic is localized within a unified package structure: restaurant_pkg. This enforces structural encapsulation, improves security privileges, and speeds up compiler optimization.
+
+
+
+Package Specifications :                                                                                                                                                
+
+CREATE OR REPLACE PACKAGE restaurant_pkg AS
+    PROCEDURE add_menu_item (
+        p_name IN VARCHAR2,
+        p_category IN VARCHAR2,
+        p_price IN NUMBER
+    );
+
+    FUNCTION get_item_subtotal (
+        p_item_id IN NUMBER,
+        p_quantity IN NUMBER
+    ) RETURN NUMBER;
+
+    PROCEDURE list_all_menu_items;
+END restaurant_pkg;
+/                                                              
+
+
+
+
+
+
+
+
+Key Modular Components Inside Body
+Procedural Data Insert (add_menu_item): Implements isolated parameter inputs to update the Menu_Items relation securely, complete with built-in transaction controls (COMMIT on success, ROLLBACK on exception block capture).
+
+Mathematical Subtotal Evaluator
+
+(get_item_subtotal): Evaluates subtotal output by calculating: Subtotal = Price x Quantity. It queries the menu internally based on p_item_id and performs safe multiplication with localized exception protections returning 0 if an item does not exist.
+
+Explicit Cursor Menu Loop (list_all_menu_items): Implements a traditional cursor, handling memory buffer management explicitly using OPEN, FETCH inside a conditional loop checking EXIT WHEN 
+ C-menu%NOTFOUND, and CLOSE to display structured menus safely.                                                                                                                                                                                                                 
+
+5. Advanced Security & Auditing Triggers
+
+Advanced database compliance requires rules that are enforced automatically on the database server.
+
+A. The Security Restriction Trigger (restrict_menu_changes)
+
+To prevent unscheduled menu restructuring, a BEFORE INSERT OR UPDATE OR DELETE statement-level trigger was developed.
+
+The trigger checks the current system timestamp. If the current day name corresponds to a weekday (Monday to Friday) or matches any date inside our reference Public_Holidays database, it invokes a standard system failure using RAISE_APPLICATION_ERROR, immediately blocking the transaction and causing an automatic rollback.
+
+B. The Compound Audit Trigger (audit_menu_compound) 
+
+To optimize auditing without facing mutating-table constraints, a modern Compound Trigger was designed. This allows the system to share structural state variables seamlessly between timing points in a single trigger structure.
+CREATE OR REPLACE TRIGGER audit_menu_compound
+FOR INSERT OR UPDATE OR DELETE ON Menu_Items
+COMPOUND TRIGGER
+
+    v_action VARCHAR2(20);
+
+    AFTER EACH ROW IS
+    BEGIN
+        IF INSERTING THEN
+            v_action := 'INSERT';
+        ELIF UPDATING THEN
+            v_action := 'UPDATE';
+        ELIF DELETING THEN
+            v_action := 'DELETE';
+        END IF;
+
+        INSERT INTO Audit_Log (username, action_type, table_name, action_date)
+        VALUES (USER, v_action, 'MENU_ITEMS', SYSTIMESTAMP);
+    END AFTER EACH ROW;
+
+END audit_menu_compound; /
+6. Implementation Verification
+
+The system underwent a rigorous dual-stage testing workflow within SQL*Plus under the authenticated schema account C##31086_MUTAZ_Restaurant_DB.
+
+Test Phase 1: Explicit Cursor Results
+SQL> SET SERVEROUTPUT ON;
+SQL> EXEC restaurant_pkg.list_all_menu_items;
+--- CURRENT RESTAURANT MENU ---
+ID: 1 | Item: Burger | Price: 12.5
+ID: 2 | Item: Pizza | Price: 15
+ID: 3 | Item: Coca Cola | Price: 2.5
+ID: 4 | Item: Pasta | Price: 14
+PL/SQL procedure successfully completed.
+Test Phase 2: Auditing & Compound Trigger Verification
+SQL> EXEC restaurant_pkg.add_menu_item('Ice Cream', 'Dessert', 5);
+Success: Ice Cream added to package menu.
+PL/SQL procedure successfully completed.
+
+SQL> SELECT username, action_type, action_date FROM Audit_Log;
+USERNAME                      ACTION_TYPE  ACTION_DATE
+C##31086_MUTAZ_Restaurant_DB  INSERT       12-JUL-2026 04:06:40.782000 PM
+7. Conclusion
+
+The developed Restaurant Management Database System (RMDS) effectively implements all system, business, and compliance requirements set forth in the course specifications.
+
+By leveraging Oracle PL/SQL package structures, performance is enhanced, and client-server network hops are minimized. The design of statement and row-level compound triggers secures structural consistency by preventing unauthorized edits outside allowed periods, while simultaneously guaranteeing total transactional visibility through real-time user-level audit logging.
